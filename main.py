@@ -17,6 +17,9 @@ from scipy.misc import imresize
 from PIL import Image
 from tqdm import tqdm
 
+## added by Jiarui
+import misc
+## end added by Jiarui
 
 class Fader():
 
@@ -29,7 +32,7 @@ class Fader():
 		self.parser.add_option('--img_width', type='int', default=256, dest='img_width')
 		self.parser.add_option('--img_height', type='int', default=256, dest='img_height')
 		self.parser.add_option('--img_depth', type='int', default=3, dest='img_depth')
-		self.parser.add_option('--num_attr', type='int', default=40, dest='num_attr')
+		self.parser.add_option('--num_attr', type='int', default=244, dest='num_attr')
 		self.parser.add_option('--max_epoch', type='int', default=64, dest='max_epoch')
 		self.parser.add_option('--num_train_images', type='int', default=150000, dest='num_train_images')
 		self.parser.add_option('--num_test_images', type='int', default=50000, dest='num_test_images')
@@ -38,9 +41,26 @@ class Fader():
 		self.parser.add_option('--enc_size', type='int', default=256, dest='enc_size')
 		self.parser.add_option('--dec_size', type='int', default=256, dest='dec_size')
 		self.parser.add_option('--model', type='string', default="draw_attn", dest='model_type')
-		self.parser.add_option('--dataset', type='string', default="celebA", dest='dataset')
-		self.parser.add_option('--dataset_dir', type='string', default="../datasets/img_align_celeba", dest='dataset_dir')
-		self.parser.add_option('--test_dataset_dir', type='string', default="../datasets/img_align_celeba", dest='test_dataset_dir')
+		# self.parser.add_option('--dataset', type='string', default="celebA", dest='dataset')
+		# self.parser.add_option('--dataset_dir', type='string', default="/mnt/fcav/3D-lighting/fadenetwork/dataset", dest='dataset_dir')
+		# self.parser.add_option('--test_dataset_dir', type='string', default="/mnt/fcav/3D-lighting/fadenetwork/dataset", dest='test_dataset_dir')
+		## added by Jiarui
+		self.parser.add_option('--train_images_dir', type='string',
+							default="/mnt/fcav/3D-lighting/fadenetwork/dataset/all_rgb",
+							dest='train_images_dir')
+		self.parser.add_option('--train_attributes_file_dir', type='string',
+							default="/mnt/fcav/3D-lighting/fadenetwork/dataset/cornellbox_attribute_list_rgb.txt",
+							help="attributes txt file directory",
+							dest='train_attributes_file_dir')
+		self.parser.add_option('--test_images_dir', type='string',
+							default="/mnt/fcav/3D-lighting/fadenetwork/dataset/all_rgb",
+							dest='test_images_dir')
+		self.parser.add_option('--test_attributes_file_dir', type='string',
+							default="/mnt/fcav/3D-lighting/fadenetwork/dataset/cornellbox_attribute_list_rgb.txt",
+							help="attributes txt file directory",
+							dest='test_attributes_file_dir')
+		self.parser.add_option('--output_dir', type='string', default="/mnt/fcav/3D-lighting/fadenetwork/results", dest='output_dir')
+		## end added by Jiarui
 
 
 	def initialize(self):
@@ -51,7 +71,7 @@ class Fader():
 
 		self.max_epoch = opt.max_epoch
 		self.batch_size = opt.batch_size
-		self.dataset = opt.dataset
+		# self.dataset = opt.dataset
 
 		self.img_width = opt.img_width
 		self.img_height = opt.img_height
@@ -65,11 +85,50 @@ class Fader():
 		self.to_test = opt.test
 		self.load_checkpoint = False
 		self.do_setup = True
-		self.dataset_dir = opt.dataset_dir
+		## modified by Jiarui
+		# self.dataset_dir = opt.dataset_dir
+		self.train_images_dir = opt.train_images_dir
+		self.train_attr_file_dir = opt.train_attributes_file_dir
+		self.test_images_dir = opt.test_images_dir
+		self.test_attr_file_dir = opt.test_attributes_file_dir
 
-		self.tensorboard_dir = "./output/" + self.model + "/" + self.dataset + "/tensorboard"
-		self.check_dir = "./output/"+ self.model + "/" + self.dataset +"/checkpoints"
-		self.images_dir = "./output/" + self.model + "/" + self.dataset + "/imgs"
+		# self.tensorboard_dir = "./output/" + self.model + "/" + self.dataset + "/tensorboard"
+		# self.check_dir = "./output/"+ self.model + "/" + self.dataset +"/checkpoints"
+		# self.images_dir = "./output/" + self.model + "/" + self.dataset + "/imgs"
+		self.result_subdir = self.create_result_subdir(opt.output_dir)
+		self.tensorboard_dir = self.result_subdir + "/tensorboard"
+		self.check_dir = self.result_subdir + "/checkpoints"
+		self.images_dir = self.result_subdir + "/imgs"
+		## end modified by Jiarui
+
+	## added by Jiarui
+	def create_result_subdir(self, result_dir):
+
+		# Select run ID and create subdir.
+		while True:
+			run_id = 0
+			for fname in glob.glob(os.path.join(result_dir, '*')):
+				try:
+					fbase = os.path.basename(fname)
+					ford = int(fbase[:fbase.find('-')])
+					run_id = max(run_id, ford + 1)
+				except ValueError:
+					pass
+
+			result_subdir = os.path.join(result_dir, '%03d-fader' % run_id)
+			try:
+				os.makedirs(result_subdir)
+				break
+			except OSError:
+				if os.path.isdir(result_subdir):
+					continue
+				raise
+
+		print("Saving results to", result_subdir)
+		misc.set_output_log_file(os.path.join(result_subdir, 'log.txt'))
+		return result_subdir
+	## end added by Jiarui
+
 
 	def normalize_input(self, imgs):
 		return imgs/127.5-1.0
@@ -94,20 +153,27 @@ class Fader():
 
 			self.train_attr = []
 
-			imageFolderPath = self.dataset_dir
-			self.imagePath = glob.glob(imageFolderPath+'/*.jpg')
+			## added by Jiarui
+			# imageFolderPath = self.dataset_dir
+			# self.imagePath = glob.glob(imageFolderPath+'/*.png')
+			imageFolderPath = self.train_images_dir
+			self.imagePath = glob.glob(imageFolderPath + '/*.png')
 
 			dictn = []
 
-			count = 0
-			with open(self.dataset_dir+"/train_attr.txt") as f:
+			# count = 0
+
+			# with open(self.dataset_dir+"/train_attr.txt") as f:
+			with open(self.train_attr_file_dir) as f:
 				for lines in f:
 					temp = lines
 					temp = temp.split()
 					dictn.append(temp[1:])
 
 			for i in range(self.num_train_images):
-				self.train_attr.append(((np.array(dictn[i]).astype(np.int32)+1)/2).astype(np.int32))
+				# self.train_attr.append(((np.array(dictn[i]).astype(np.int32)+1)/2).astype(np.int32))
+				self.train_attr.append(np.array(dictn[i]).astype(np.int32))
+			## end added by Jiarui
 
 			self.train_attr_1h = self.transform_attr(self.train_attr)
 			# print(self.train_attr[0:10])
@@ -116,13 +182,19 @@ class Fader():
 
 			self.test_attr = []
 
-			imageFolderPath = self.test_dataset_dir
-			self.imagePath = glob.glob(imageFolderPath+'/*.jpg')
+			## added by Jiarui
+			# imageFolderPath = self.test_dataset_dir
+			# self.imagePath = glob.glob(imageFolderPath+'/*.png')
+			imageFolderPath = self.test_images_dir
+			self.imagePath = glob.glob(imageFolderPath + '/*.png')
 
 			dictn = []
 
-			count = 0
-			with open(self.dataset_dir+"/test_attr.txt") as f:
+			# count = 0
+
+			# with open(self.dataset_dir+"/train_attr.txt") as f:
+			with open(self.test_attr_file_dir) as f:
+				## end added by Jiarui
 				for lines in f:
 					temp = lines
 					temp = temp.split()
@@ -368,4 +440,7 @@ def main():
 
 
 if __name__ == "__main__":
+	## added by Jiarui
+	misc.init_output_logging()
+	## end added by Jiarui
 	main()
